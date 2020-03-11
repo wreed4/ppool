@@ -24,18 +24,22 @@ class MultiStdOut:
     lock = RLock()
 
     def __init__(self, buffered=True, *_ignored):
-        s_id = self.id
-        if not buffered or s_id == 'MainThread':
-            self.register(self.o_out)
-        else:
-            self.register(tempfile.SpooledTemporaryFile(mode='w+'))
+        self.buffered = buffered
 
-    def register(self, out):
-        """
-        Registers the given output stream to the current worker
-        """
+    def __enter__(self):
         with self.lock:
-            self.outs[self.id] = out
+            s_id = self.id
+            if not self.buffered or s_id == 'MainThread':
+                self.outs[s_id] = self.o_out
+            else:
+                self.outs[s_id] = tempfile.SpooledTemporaryFile(mode='w+')
+        return self
+
+    def __exit__(self, *args):
+        self.write(str(self.outs)+"\n", real=True)
+        self._dump()
+        with self.lock:
+            del self.outs[self.id]
 
     @property
     def id(self):
@@ -67,7 +71,7 @@ class MultiStdOut:
             out = self.o_out if real else self.c_out
             return out.write(*args, **kwargs)
 
-    def dump(self):
+    def _dump(self):
         """
         Write all accumulated output to the real sys.stdout at once
         """
@@ -86,16 +90,14 @@ class ThreadedCallable:
         self.buffered = buffered
 
     def __call__(self, *args, **kwargs):
-        out = MultiStdOut(self.buffered)
-        ret = self.func(*args, **kwargs)
-        out.dump()
-        return ret
+        with MultiStdOut(self.buffered) as out:
+            return self.func(*args, **kwargs)
 
 class ProcessCallable(ThreadedCallable):
     def __call__(self, *args, **kwargs):
-        out = MultiStdOut(self.buffered)
-        with redirect_stdout(out):
-            return super().__call__(*args, **kwargs)
+        with MultiStdOut(self.buffered) as out:
+            with redirect_stdout(out):
+                return self.func(*args, **kwargs)
 
 def _test_func(i):
     import time
@@ -121,8 +123,8 @@ def map(func, iterable, threaded=True, fg=False, buffered=True, star=False, **po
         buffered = False
 
     call = ThreadedCallable(func, buffered) if threaded else ProcessCallable(func, buffered)
-    n = MultiStdOut(buffered)
     with poolcls(**poolargs) as mypool:
         mapfunc = mypool.starmap if star else mypool.map
-        with redirect_stdout(n):
-            mapfunc(call, iterable)
+        with MultiStdOut(buffered) as out:
+            with redirect_stdout(out):
+                mapfunc(call, iterable)
