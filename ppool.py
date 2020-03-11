@@ -36,7 +36,6 @@ class MultiStdOut:
         return self
 
     def __exit__(self, *args):
-        self.write(str(self.outs)+"\n", real=True)
         self._dump()
         with self.lock:
             del self.outs[self.id]
@@ -99,16 +98,6 @@ class ProcessCallable(ThreadedCallable):
             with redirect_stdout(out):
                 return self.func(*args, **kwargs)
 
-def _test_func(i):
-    import time
-    import random
-    print(i)
-    time.sleep(random.randint(0,3))
-    print(i)
-    time.sleep(random.randint(0,3))
-    print(i)
-
-
 def map(func, iterable, threaded=True, fg=False, buffered=True, star=False, **poolargs):
     """
     A replacement for pool.map which can run with either threads or processes
@@ -128,3 +117,32 @@ def map(func, iterable, threaded=True, fg=False, buffered=True, star=False, **po
         with MultiStdOut(buffered) as out:
             with redirect_stdout(out):
                 mapfunc(call, iterable)
+
+
+def _test_func(i):
+    import time
+    import random
+    print(i)
+    time.sleep(random.randint(0,3))
+    print(i)
+    time.sleep(random.randint(0,3))
+    print(i)
+
+def _main():
+    print("Buffered, Threaded")
+    map(_test_func, range(5))
+
+    print("Buffered, Processes")
+    map(_test_func, range(5), threaded=False)
+
+    print("Non-buffered, Threaded")
+    map(_test_func, range(5), buffered=False)
+
+    print("Non-buffered, Processes")
+    map(_test_func, range(5), buffered=False, threaded=False)
+
+    print("Foreground")
+    map(_test_func, range(5), fg=True)
+
+if __name__ == "__main__":
+    _main()
